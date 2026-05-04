@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: gomapet-dashboard
+    runtime: python
+    buildCommand: "echo 'sem build'"
+    startCommand: python server.py
+    envVars:
+      - key: META_TOKEN
+        sync: false          # valor secreto — inserir no painel do Render
+      - key: META_ACCOUNT_ID
+        value: act_577944235396417
