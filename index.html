@@ -1118,6 +1118,7 @@ td{padding:10px 14px;font-size:12.5px;}
   </div>
   <div id="loadMsg" style="font-size:12px;color:var(--g1)">Conectando à Meta Ads…</div>
   <div id="loadSub" style="font-size:11px;color:var(--g2);max-width:280px;text-align:center">Buscando campanhas, funil e dados diários</div>
+  <button id="loadRetry" onclick="bootRetry()" style="display:none;margin-top:8px;padding:8px 20px;background:var(--green);color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-family:'Fredoka',sans-serif">Tentar novamente</button>
 </div>
 
 <script>
@@ -2377,17 +2378,23 @@ function setMetaStatus(msg,col){
   if(el){el.textContent=msg;el.style.color=col||'var(--g1)';}
 }
 
-async function fetchMetaData(accountId){
+async function fetchMetaData(accountId,timeoutMs=55000){
   if(META.loading)return;
   META.loading=true;
-  const url=`/api/meta-ads?account_id=${encodeURIComponent(accountId)}`;
-  const res=await fetch(url);
-  const data=await res.json();
-  META.loading=false;
-  if(!data.ok) throw new Error(data.error||'Falha na API Meta');
-  META.lastData=data;
-  applyMetaData(data);
-  return data;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{
+    const url=`/api/meta-ads?account_id=${encodeURIComponent(accountId)}`;
+    const res=await fetch(url,{signal:controller.signal});
+    const data=await res.json();
+    if(!data.ok) throw new Error(data.error||'Falha na API Meta');
+    META.lastData=data;
+    applyMetaData(data);
+    return data;
+  }finally{
+    clearTimeout(timer);
+    META.loading=false;
+  }
 }
 
 function applyMetaData(data){
@@ -2561,27 +2568,61 @@ function setLoadMsg(msg,sub){
   if(sub&&s)s.textContent=sub;
 }
 
+function showLoadError(msg){
+  setLoadMsg(msg,'');
+  const lm=document.getElementById('loadMsg');
+  if(lm)lm.style.color='var(--red)';
+  const btn=document.getElementById('loadRetry');
+  if(btn)btn.style.display='block';
+}
+
+function dismissLoader(){
+  const ls=document.getElementById('loadingScreen');
+  if(ls)ls.remove();
+  try{compute();}catch(_){}
+  try{renderVendas();}catch(_){}
+  try{renderAlertas();}catch(_){}
+}
+
+window.bootRetry=async function(){
+  const btn=document.getElementById('loadRetry');
+  if(btn)btn.style.display='none';
+  const lm=document.getElementById('loadMsg');
+  if(lm)lm.style.color='var(--g1)';
+  setLoadMsg('Reconectando…','Aguarde enquanto buscamos os dados');
+  try{
+    await fetchMetaData(META.accountId);
+  }catch(e){
+    console.warn('Retry failed:',e.message);
+    showLoadError(e.name==='AbortError'?'Servidor demorou demais — tente novamente':'Erro: '+e.message);
+  }
+};
+
 window.addEventListener('DOMContentLoaded',async()=>{
   try{startClock();}catch(e){console.error(e);}
 
   if(META.accountId){
     setLoadMsg('Conectando à Meta Ads…','Buscando campanhas, funil e dados diários');
+    // Show retry button after 15s if still loading (Render free tier cold start)
+    const retryTimer=setTimeout(()=>{
+      if(META.loading){
+        setLoadMsg('Servidor iniciando…','O Render pode levar até 50s no primeiro acesso');
+        const btn=document.getElementById('loadRetry');
+        if(btn)btn.style.display='block';
+      }
+    },15000);
     try{
-      // Progressive messages so user sees activity
       const t1=setTimeout(()=>setLoadMsg('Buscando campanhas…','Isso pode levar alguns segundos'),800);
       const t2=setTimeout(()=>setLoadMsg('Calculando ROAS e funil…','Processando 30 dias de dados'),3000);
       const t3=setTimeout(()=>setLoadMsg('Quase lá…','Agregando segmentos de campanha'),6000);
       await fetchMetaData(META.accountId);
       clearTimeout(t1);clearTimeout(t2);clearTimeout(t3);
+      clearTimeout(retryTimer);
     }catch(e){
+      clearTimeout(retryTimer);
       console.warn('Meta auto-connect failed:',e.message);
-      const ls=document.getElementById('loadingScreen');
-      if(ls){
-        setLoadMsg('Erro ao conectar','Verifique se o servidor está rodando');
-        const lm=document.getElementById('loadMsg');
-        if(lm)lm.style.color='var(--red)';
-        setTimeout(()=>{if(ls)ls.remove();},3000);
-      }
+      const isAbort=e.name==='AbortError';
+      showLoadError(isAbort?'Servidor demorou demais — tente novamente':'Erro ao conectar');
       const chip=document.getElementById('metaChip');
       const dot=document.getElementById('metaDot');
       if(chip)chip.className='meta-chip err';
@@ -2591,11 +2632,7 @@ window.addEventListener('DOMContentLoaded',async()=>{
       try{renderAlertas();}catch(_){}
     }
   }else{
-    const ls=document.getElementById('loadingScreen');
-    if(ls)ls.remove();
-    try{compute();}catch(e){console.error(e);}
-    try{renderVendas();}catch(e){console.error(e);}
-    try{renderAlertas();}catch(e){console.error(e);}
+    dismissLoader();
   }
 });
 </script>
