@@ -261,6 +261,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             print(f"  [{ts}] API {args[1] if len(args)>1 else ''} {path[:80]}")
 
     def do_GET(self):
+        if self.path.startswith("/api/ping"):
+            self._json({"ok": True, "ready": bool(CACHE)})
+            return
+
         if self.path.startswith("/api/meta-ads"):
             qs     = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             act_id = (qs.get("account_id") or [DEFAULT_ACCOUNT])[0].strip() or DEFAULT_ACCOUNT
