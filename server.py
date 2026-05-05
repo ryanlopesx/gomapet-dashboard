@@ -262,6 +262,12 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if "/api/" in str(path):
             print(f"  [{ts}] API {args[1] if len(args)>1 else ''} {path[:80]}")
 
+    def end_headers(self):
+        # Prevent browser from caching HTML so new deploys take effect immediately
+        if self.path in ("/", "/index.html", "") or not "." in self.path.split("/")[-1]:
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
+        super().end_headers()
+
     def do_GET(self):
         if self.path.startswith("/api/ping"):
             self._json({"ok": True, "ready": PREWARM_DONE.is_set()})
