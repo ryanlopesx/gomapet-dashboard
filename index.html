@@ -2584,25 +2584,28 @@ function dismissLoader(){
   try{renderAlertas();}catch(_){}
 }
 
-async function waitForServer(maxWaitMs=90000){
-  const deadline=Date.now()+maxWaitMs;
-  let attempt=0;
+async function waitForReady(maxWaitMs=60000){
+  const start=Date.now();
+  const deadline=start+maxWaitMs;
   while(Date.now()<deadline){
     try{
       const ctrl=new AbortController();
-      const t=setTimeout(()=>ctrl.abort(),5000);
+      const t=setTimeout(()=>ctrl.abort(),6000);
       const r=await fetch('/api/ping',{signal:ctrl.signal});
       clearTimeout(t);
-      if(r.ok) return true;
-    }catch(_){}
-    attempt++;
-    setLoadMsg(
-      attempt<=3?'Conectando à Meta Ads…':'Servidor iniciando…',
-      attempt<=3?'Buscando campanhas, funil e dados diários':`Aguarde… (${Math.round((Date.now()-(deadline-maxWaitMs))/1000)}s)`
-    );
-    await new Promise(res=>setTimeout(res,3000));
+      if(r.ok){
+        const j=await r.json();
+        const elapsed=Math.round((Date.now()-start)/1000);
+        if(j.ready) return 'ready';            // cache warm — fetch will be instant
+        if(elapsed>0) setLoadMsg('Preparando dados…',`Buscando da Meta Ads… ${elapsed}s`);
+        else return 'alive';                   // server alive, fetch immediately
+      }
+    }catch(_){
+      setLoadMsg('Aguardando servidor…','Isso pode levar alguns segundos');
+    }
+    await new Promise(res=>setTimeout(res,2000));
   }
-  return false;
+  return 'timeout';
 }
 
 window.bootRetry=async function(){
@@ -2615,9 +2618,10 @@ window.bootRetry=async function(){
 
 async function runBoot(){
   try{
-    const alive=await waitForServer(90000);
-    if(!alive){showLoadError('Servidor não respondeu — tente novamente');return;}
-    setLoadMsg('Buscando dados da Meta…','Processando campanhas e funil');
+    setLoadMsg('Conectando à Meta Ads…','Verificando servidor');
+    const status=await waitForReady(60000);
+    if(status==='timeout'){showLoadError('Servidor não respondeu — tente novamente');return;}
+    setLoadMsg('Carregando dados…','Buscando campanhas e funil');
     await fetchMetaData(META.accountId);
   }catch(e){
     console.warn('Boot failed:',e.message);

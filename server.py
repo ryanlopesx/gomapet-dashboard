@@ -11,7 +11,7 @@ DEFAULT_ACCOUNT = os.environ.get("META_ACCOUNT_ID", "act_577944235396417")
 API_VER         = "v19.0"
 BASE            = f"https://graph.facebook.com/{API_VER}"
 CACHE           = {}
-TTL             = 1800  # 30 min
+TTL             = 7200  # 2h
 
 
 def meta_get(path, params={}):
