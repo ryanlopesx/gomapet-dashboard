@@ -4,6 +4,7 @@ GomaPet Dashboard — servidor local + proxy Meta Ads API
 Uso: python3 server.py   →  http://localhost:8765
 """
 import http.server, json, urllib.request, urllib.parse, os, time, re, threading
+from socketserver import ThreadingMixIn
 
 PORT            = int(os.environ.get("PORT", 8765))
 TOKEN           = os.environ.get("META_TOKEN", "")
@@ -12,6 +13,7 @@ API_VER         = "v19.0"
 BASE            = f"https://graph.facebook.com/{API_VER}"
 CACHE           = {}
 TTL             = 7200  # 2h
+PREWARM_DONE    = threading.Event()  # set when first cache load completes
 
 
 def meta_get(path, params={}):
@@ -262,7 +264,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/api/ping"):
-            self._json({"ok": True, "ready": bool(CACHE)})
+            self._json({"ok": True, "ready": PREWARM_DONE.is_set()})
             return
 
         if self.path.startswith("/api/meta-ads"):
@@ -271,6 +273,9 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             force  = "force" in qs
             if force and f"meta_{act_id}" in CACHE:
                 del CACHE[f"meta_{act_id}"]
+            # Wait for pre-warm to finish (avoids duplicate Meta API calls on startup)
+            if not PREWARM_DONE.is_set():
+                PREWARM_DONE.wait(timeout=60)
             try:
                 data = cached(f"meta_{act_id}", lambda: build_payload(act_id))
                 self._json(data)
@@ -313,6 +318,12 @@ def _prewarm():
         print(f"  [pre-warm] OK — ROAS {data['summary']['roas']}× · {data['summary']['conv']} conversões")
     except Exception as e:
         print(f"  [pre-warm] Erro: {e}")
+    finally:
+        PREWARM_DONE.set()  # unblock any waiting requests even if pre-warm failed
+
+
+class ThreadingHTTPServer(ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
 
 
 if __name__ == "__main__":
@@ -326,7 +337,7 @@ if __name__ == "__main__":
     print(f"  ╚══════════════════════════════════════════╝")
     print(f"\n  Ctrl+C para parar\n")
     threading.Thread(target=_prewarm, daemon=True).start()
-    server = http.server.HTTPServer(("", PORT), Handler)
+    server = ThreadingHTTPServer(("", PORT), Handler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
